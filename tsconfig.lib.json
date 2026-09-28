@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "declaration": true,
+    "declarationMap": true,
+    "emitDeclarationOnly": true,
+    "noEmit": false,
+    "outDir": "dist"
+  },
+  "include": [
+    "src/index.ts",
+    "src/APVEngine.ts",
+    "src/types.ts",
+    "src/audio/**/*.ts",
+    "src/reactive/**/*.ts",
+    "src/visualizers/**/*.ts"
+  ],
+  "exclude": ["src/main.ts", "src/debug/**"]
+}
