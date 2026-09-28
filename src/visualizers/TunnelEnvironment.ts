@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { ReactiveState, VisualizerOptions } from '../types';
 import { DEFAULT_VISUALIZER_OPTIONS } from '../types';
 import { disposeScene, type VisualizerEnvironment } from './Environment';
+import { APV_MIDNIGHT, setSpectralColor } from './SpectralPalette';
 
 export class TunnelEnvironment implements VisualizerEnvironment {
   private readonly scene = new THREE.Scene();
@@ -21,7 +22,7 @@ export class TunnelEnvironment implements VisualizerEnvironment {
   constructor(options: Partial<VisualizerOptions> = {}) {
     this.setOptions(options);
     this.renderer.setSize(1, 1, false);
-    this.renderer.setClearColor('#010104');
+    this.renderer.setClearColor(APV_MIDNIGHT.background);
     this.scene.add(this.root);
 
     this.scene.add(new THREE.AmbientLight('#615cff', 0.85));
@@ -80,8 +81,9 @@ export class TunnelEnvironment implements VisualizerEnvironment {
 
   update(state: ReactiveState, dt: number): void {
     this.time += dt;
-    const motion = this.options.reducedMotion ? this.options.motionIntensity * 0.28 : this.options.motionIntensity;
+    const baseMotion = this.options.reducedMotion ? this.options.motionIntensity * 0.28 : this.options.motionIntensity;
     const { reactivity, energy, events } = state;
+    const motion = baseMotion * (1 - events.quiet * 0.72);
 
     const tunnelScale = 1 + motion * (reactivity.bass * 0.2 + reactivity.sub * 0.16);
     this.tunnel.scale.set(tunnelScale, tunnelScale, 1);
@@ -100,8 +102,8 @@ export class TunnelEnvironment implements VisualizerEnvironment {
       ring.scale.setScalar(1 + motion * (reactivity.highMid * 0.12 + events.snare * 0.11 * (1 - phase)));
       ring.rotation.z += dt * motion * (0.04 + reactivity.mid * 0.14);
       if (this.options.palette === 'rainbow') {
-        this.ringMaterials[i].color.setHSL((this.time * 0.025 + phase * 0.32 + 0.5) % 1, 0.9, 0.58);
-        this.ringMaterials[i].emissive.setHSL((this.time * 0.02 + phase * 0.32 + 0.68) % 1, 0.76, 0.16);
+        setSpectralColor(this.ringMaterials[i].color, this.time * 0.018 + phase * 0.36 + 0.5);
+        setSpectralColor(this.ringMaterials[i].emissive, this.time * 0.014 + phase * 0.36 + 0.68).multiplyScalar(0.3);
       }
     }
 
@@ -114,10 +116,10 @@ export class TunnelEnvironment implements VisualizerEnvironment {
     this.particles.geometry.attributes.position.needsUpdate = true;
 
     if (this.options.palette === 'rainbow') {
-      const hue = (this.time * 0.02 + reactivity.high * 0.1) % 1;
-      this.tunnelMaterial.color.setHSL((hue + 0.65) % 1, 0.7, 0.2);
-      this.tunnelMaterial.emissive.setHSL((hue + 0.75) % 1, 0.72, 0.09 + events.drop * 0.08);
-      this.particleMaterial.color.setHSL((hue + 0.92) % 1, 0.95, 0.66);
+      const phase = this.time * 0.014 + reactivity.high * 0.08;
+      setSpectralColor(this.tunnelMaterial.color, phase + 0.65).multiplyScalar(0.42);
+      setSpectralColor(this.tunnelMaterial.emissive, phase + 0.76).multiplyScalar(0.2 + events.drop * 0.12);
+      setSpectralColor(this.particleMaterial.color, phase + 0.92);
     }
     this.particleMaterial.opacity = 0.2 + reactivity.high * 0.34 + events.snare * 0.2;
     this.renderer.render(this.scene, this.camera);
