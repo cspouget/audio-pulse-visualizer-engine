@@ -2,105 +2,115 @@ import { computeBandValues } from './FrequencyBands';
 import type { AudioAnalysis } from '../types';
 import { EMPTY_ANALYSIS } from '../types';
 
-const clamp = (value: number, min = 0, max = 1) => Math.min(Math.max(value, min), max);
+export interface AudioAnalyzerInitOptions {
+  audioContext?: AudioContext;
+  connectToDestination?: boolean;
+}
 
 export class AudioAnalyzer {
   private audioContext: AudioContext | null = null;
   private analyser: AnalyserNode | null = null;
-  private mediaSource: MediaElementAudioSourceNode | MediaStreamAudioSourceNode | null = null;
-  private frequencyData: Uint8Array | null = null;
-  private demoOscillators: OscillatorNode[] = [];
-  private demoGain: GainNode | null = null;
+  private mediaSource: AudioNode | null = null;
+  private frequencyData: Uint8Array<ArrayBuffer> | null = null;
+  private mediaStream: MediaStream | null = null;
+  private ownsContext = false;
+  private connectedElement: HTMLMediaElement | null = null;
 
-  async initFromMicrophone(): Promise<void> {
-    this.audioContext = new AudioContext();
-    this.analyser = this.audioContext.createAnalyser();
-    this.analyser.fftSize = 2048;
-    this.frequencyData = new Uint8Array(this.analyser.frequencyBinCount);
-
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    this.mediaSource = this.audioContext.createMediaStreamAudioSource(stream);
-    this.mediaSource.connect(this.analyser);
-    this.analyser.connect(this.audioContext.destination);
-  }
-
-  initFromAudioElement(element: HTMLAudioElement): void {
-    this.audioContext = new AudioContext();
-    this.analyser = this.audioContext.createAnalyser();
-    this.analyser.fftSize = 2048;
-    this.frequencyData = new Uint8Array(this.analyser.frequencyBinCount);
-
-    this.mediaSource = this.audioContext.createMediaElementAudioSource(element);
-    this.mediaSource.connect(this.analyser);
-    this.analyser.connect(this.audioContext.destination);
-  }
-
-  startDemoSource(): void {
-    if (!this.audioContext) {
-      this.audioContext = new AudioContext();
+  private prepareContext(context?: AudioContext): AudioContext {
+    if (this.audioContext) {
+      return this.audioContext;
     }
-
+    this.audioContext = context ?? new AudioContext();
+    this.ownsContext = !context;
     this.analyser = this.audioContext.createAnalyser();
     this.analyser.fftSize = 2048;
+    this.analyser.smoothingTimeConstant = 0.62;
     this.frequencyData = new Uint8Array(this.analyser.frequencyBinCount);
+    return this.audioContext;
+  }
 
-    this.demoGain = this.audioContext.createGain();
-    this.demoGain.gain.value = 0.15;
-    this.demoGain.connect(this.analyser);
-    this.analyser.connect(this.audioContext.destination);
+  async initFromMicrophone(options: AudioAnalyzerInitOptions = {}): Promise<void> {
+    this.disconnectSource();
+    const context = this.prepareContext(options.audioContext);
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    this.mediaStream = stream;
+    this.mediaSource = context.createMediaStreamSource(stream);
+    this.mediaSource.connect(this.analyser!);
+    if (options.connectToDestination === true) {
+      this.analyser!.connect(context.destination);
+    }
+  }
 
-    const time = this.audioContext.currentTime;
+  initFromAudioElement(element: HTMLAudioElement, options: AudioAnalyzerInitOptions = {}): void {
+    if (this.connectedElement === element && this.mediaSource) {
+      return;
+    }
+    this.disconnectSource();
+    const context = this.prepareContext(options.audioContext);
+    this.mediaSource = context.createMediaElementSource(element);
+    this.connectedElement = element;
+    this.mediaSource.connect(this.analyser!);
+    if (options.connectToDestination !== false) {
+      this.analyser!.connect(context.destination);
+    }
+  }
 
-    const subOsc = this.audioContext.createOscillator();
-    subOsc.frequency.value = 45;
-    subOsc.type = 'sine';
-    const subGain = this.audioContext.createGain();
-    subGain.gain.value = 0.08;
-    subOsc.connect(subGain);
-    subGain.connect(this.demoGain);
-    subOsc.start();
-    this.demoOscillators.push(subOsc);
+  initFromNode(node: AudioNode, options: AudioAnalyzerInitOptions = {}): void {
+    this.disconnectSource();
+    this.prepareContext(options.audioContext ?? node.context as AudioContext);
+    this.mediaSource = node;
+    this.mediaSource.connect(this.analyser!);
+    if (options.connectToDestination === true) {
+      this.analyser!.connect(this.audioContext!.destination);
+    }
+  }
 
-    const bassOsc = this.audioContext.createOscillator();
-    bassOsc.frequency.value = 110;
-    bassOsc.type = 'sine';
-    const bassGain = this.audioContext.createGain();
-    bassGain.gain.value = 0.12;
-    bassOsc.connect(bassGain);
-    bassGain.connect(this.demoGain);
-    bassOsc.start();
-    this.demoOscillators.push(bassOsc);
-
-    const kickEnv = this.audioContext.createGain();
-    kickEnv.gain.setValueAtTime(0.2, time);
-    kickEnv.gain.exponentialRampToValueAtTime(0.01, time + 0.08);
-    setTimeout(
-      () => {
-        kickEnv.gain.setValueAtTime(0.2, this.audioContext!.currentTime);
-        kickEnv.gain.exponentialRampToValueAtTime(0.01, this.audioContext!.currentTime + 0.08);
-      },
-      1600,
-    );
-
-    const kickOsc = this.audioContext.createOscillator();
-    kickOsc.frequency.setValueAtTime(220, time);
-    kickOsc.frequency.exponentialRampToValueAtTime(45, time + 0.15);
-    kickOsc.connect(kickEnv);
-    kickEnv.connect(this.demoGain);
-    kickOsc.start();
-    this.demoOscillators.push(kickOsc);
+  async resume(): Promise<void> {
+    if (this.audioContext?.state === 'suspended') {
+      await this.audioContext.resume();
+    }
   }
 
   update(): AudioAnalysis {
     if (!this.analyser || !this.frequencyData) {
       return EMPTY_ANALYSIS;
     }
-
     this.analyser.getByteFrequencyData(this.frequencyData);
-
     const sampleRate = this.audioContext?.sampleRate ?? 44100;
-    const analysis = computeBandValues(this.frequencyData, sampleRate, this.analyser.fftSize);
+    return computeBandValues(this.frequencyData, sampleRate, this.analyser.fftSize);
+  }
 
-    return analysis;
+  private disconnectSource(): void {
+    try {
+      if (this.mediaSource && this.analyser) {
+        // Remove only the engine's analyser edge. A host-owned AudioNode may
+        // have other destinations that must remain intact.
+        this.mediaSource.disconnect(this.analyser);
+      }
+    } catch {
+      // Already disconnected or the edge was never present.
+    }
+    try {
+      this.analyser?.disconnect();
+    } catch {
+      // Already disconnected.
+    }
+    this.mediaSource = null;
+    this.connectedElement = null;
+    if (this.mediaStream) {
+      for (const track of this.mediaStream.getTracks()) track.stop();
+      this.mediaStream = null;
+    }
+  }
+
+  async dispose(): Promise<void> {
+    this.disconnectSource();
+    this.frequencyData = null;
+    this.analyser = null;
+    if (this.ownsContext && this.audioContext && this.audioContext.state !== 'closed') {
+      await this.audioContext.close();
+    }
+    this.audioContext = null;
+    this.ownsContext = false;
   }
 }

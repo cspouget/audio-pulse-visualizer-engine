@@ -1,123 +1,133 @@
 import * as THREE from 'three';
-import type { ReactiveState } from '../types';
+import type { ReactiveState, VisualizerOptions } from '../types';
+import { DEFAULT_VISUALIZER_OPTIONS } from '../types';
+import { disposeScene, type VisualizerEnvironment } from './Environment';
+import { APV_MIDNIGHT, setSpectralColor } from './SpectralPalette';
 
-const clamp = (value: number, min = 0, max = 1) => Math.min(Math.max(value, min), max);
-
-export class TunnelEnvironment {
+export class TunnelEnvironment implements VisualizerEnvironment {
   private readonly scene = new THREE.Scene();
-  private readonly camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2000);
+  private readonly camera = new THREE.PerspectiveCamera(60, 1, 0.1, 2000);
   private readonly root = new THREE.Group();
+  private readonly tunnel: THREE.Mesh;
+  private readonly rings = new THREE.Group();
+  private readonly particles: THREE.Points;
+  private readonly tunnelMaterial: THREE.MeshStandardMaterial;
+  private readonly ringMaterials: THREE.MeshStandardMaterial[] = [];
+  private readonly particleMaterial: THREE.PointsMaterial;
+  private options: VisualizerOptions = { ...DEFAULT_VISUALIZER_OPTIONS };
+  private time = 0;
 
-  public readonly renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  readonly renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
 
-  private tunnel: THREE.Mesh;
-  private rings: THREE.Group;
-  private particles: THREE.Points;
-
-  constructor() {
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.8));
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setClearColor(new THREE.Color('#020408'));
-
+  constructor(options: Partial<VisualizerOptions> = {}) {
+    this.setOptions(options);
+    this.renderer.setSize(1, 1, false);
+    this.renderer.setClearColor(APV_MIDNIGHT.background);
     this.scene.add(this.root);
-    this.camera.position.z = 0;
 
-    const ambientLight = new THREE.AmbientLight('#5a8ac4', 0.9);
-    const spotLight = new THREE.SpotLight('#7db4ff', 2.5);
-    spotLight.position.set(0, 0, 20);
-    spotLight.target.position.set(0, 0, -50);
+    this.scene.add(new THREE.AmbientLight('#615cff', 0.85));
+    const spot = new THREE.SpotLight('#66f5ff', 2.6);
+    spot.position.set(0, 0, 20);
+    spot.target.position.set(0, 0, -50);
+    this.scene.add(spot, spot.target);
 
-    this.scene.add(ambientLight, spotLight, spotLight.target);
-
-    const tunnelGeometry = new THREE.CylinderGeometry(3.2, 3.2, 100, 32, 32);
-    const tunnelMaterial = new THREE.MeshStandardMaterial({
-      color: '#1a3a5c',
-      emissive: '#0d1f3d',
-      metalness: 0.3,
-      roughness: 0.4,
-      transparent: true,
-      opacity: 0.85,
-      side: THREE.DoubleSide,
+    this.tunnelMaterial = new THREE.MeshStandardMaterial({
+      color: '#151b54', emissive: '#090b24', metalness: 0.36, roughness: 0.34,
+      transparent: true, opacity: 0.86, side: THREE.DoubleSide,
     });
-
-    this.tunnel = new THREE.Mesh(tunnelGeometry, tunnelMaterial);
+    this.tunnel = new THREE.Mesh(new THREE.CylinderGeometry(3.2, 3.2, 100, 32, 24), this.tunnelMaterial);
     this.tunnel.rotation.x = Math.PI / 2;
     this.root.add(this.tunnel);
 
-    this.rings = new THREE.Group();
     for (let i = 0; i < 12; i += 1) {
-      const ringGeometry = new THREE.TorusGeometry(3.2, 0.15, 16, 100);
-      const ringMaterial = new THREE.MeshStandardMaterial({
-        color: '#4db8e8',
-        emissive: '#1a5a7a',
-        metalness: 0.6,
-        roughness: 0.2,
-        transparent: true,
-        opacity: 0.7,
+      const material = new THREE.MeshStandardMaterial({
+        color: '#4bd8ff', emissive: '#35145f', metalness: 0.62, roughness: 0.18,
+        transparent: true, opacity: 0.72,
       });
-      const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+      this.ringMaterials.push(material);
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(3.2, 0.14, 12, 72), material);
       ring.position.z = i * -8;
       this.rings.add(ring);
     }
     this.root.add(this.rings);
 
-    const particleGeometry = new THREE.BufferGeometry();
-    const particleCount = 800;
-    const positions = new Float32Array(particleCount * 3);
-    for (let i = 0; i < particleCount; i += 1) {
+    const geometry = new THREE.BufferGeometry();
+    const count = 900;
+    const positions = new Float32Array(count * 3);
+    for (let i = 0; i < count; i += 1) {
       const angle = Math.random() * Math.PI * 2;
-      const radius = 2.8 + Math.random() * 0.4;
+      const radius = 2.75 + Math.random() * 0.5;
       positions[i * 3] = Math.cos(angle) * radius;
       positions[i * 3 + 1] = Math.sin(angle) * radius;
       positions[i * 3 + 2] = Math.random() * -100;
     }
-    particleGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    const particleMaterial = new THREE.PointsMaterial({
-      color: '#b3e5fc',
-      size: 0.06,
-      transparent: true,
-      opacity: 0.6,
-    });
-    this.particles = new THREE.Points(particleGeometry, particleMaterial);
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    this.particleMaterial = new THREE.PointsMaterial({ color: '#ff56c7', size: 0.055, transparent: true, opacity: 0.62 });
+    this.particles = new THREE.Points(geometry, this.particleMaterial);
     this.root.add(this.particles);
-
-    window.addEventListener('resize', () => this.handleResize());
   }
 
-  handleResize() {
-    this.camera.aspect = window.innerWidth / window.innerHeight;
+  setOptions(options: Partial<VisualizerOptions>): void {
+    this.options = { ...this.options, ...options };
+  }
+
+  resize(width: number, height: number, pixelRatio = window.devicePixelRatio): void {
+    const safeHeight = Math.max(1, height);
+    this.camera.aspect = Math.max(1, width) / safeHeight;
     this.camera.updateProjectionMatrix();
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.setPixelRatio(Math.min(pixelRatio, this.options.complexity > 1 ? 2 : 1.5));
+    this.renderer.setSize(Math.max(1, width), safeHeight, false);
   }
 
-  update(state: ReactiveState, dt: number) {
-    const { reactivity, energy, motion, events } = state;
+  update(state: ReactiveState, dt: number): void {
+    this.time += dt;
+    const baseMotion = this.options.reducedMotion ? this.options.motionIntensity * 0.28 : this.options.motionIntensity;
+    const { reactivity, energy, events } = state;
+    const motion = baseMotion * (1 - events.quiet * 0.72);
 
-    const tunnelScale = 1 + reactivity.bass * 0.4 + reactivity.sub * 0.3;
+    const tunnelScale = 1 + motion * (reactivity.bass * 0.2 + reactivity.sub * 0.16);
     this.tunnel.scale.set(tunnelScale, tunnelScale, 1);
-    this.tunnel.position.z = -motion.impact * 3.2;
+    this.tunnel.position.z += ((-events.kick * 1.4 * motion) - this.tunnel.position.z) * 0.16;
 
-    this.camera.position.z += (energy.smoothed * 15 + motion.impact * 2 - this.camera.position.z) * 0.08;
-    this.camera.position.x = motion.flow * 1.2;
-    this.camera.position.y = motion.pressure * 1.2;
-    this.camera.fov = 60 + events.kick * 8;
+    const targetZ = energy.smoothed * 7 * motion + events.drop * 4 * motion;
+    this.camera.position.z += (targetZ - this.camera.position.z) * 0.065;
+    this.camera.position.x += (((state.motion.flow - 0.45) * 0.9 * motion) - this.camera.position.x) * 0.05;
+    this.camera.position.y += (((state.motion.pressure - 0.45) * 0.8 * motion) - this.camera.position.y) * 0.05;
+    this.camera.fov += ((60 + events.kick * 4 * motion + events.drop * 7 * motion) - this.camera.fov) * 0.16;
     this.camera.updateProjectionMatrix();
 
     for (let i = 0; i < this.rings.children.length; i += 1) {
       const ring = this.rings.children[i] as THREE.Mesh;
-      ring.scale.setScalar(1 + reactivity.highMid * 0.3 + motion.shimmer * 0.2);
-      ring.rotation.z += dt * (0.1 + reactivity.mid * 0.2);
+      const phase = i / this.rings.children.length;
+      ring.scale.setScalar(1 + motion * (reactivity.highMid * 0.12 + events.snare * 0.11 * (1 - phase)));
+      ring.rotation.z += dt * motion * (0.04 + reactivity.mid * 0.14);
+      if (this.options.palette === 'rainbow') {
+        setSpectralColor(this.ringMaterials[i].color, this.time * 0.018 + phase * 0.36 + 0.5);
+        setSpectralColor(this.ringMaterials[i].emissive, this.time * 0.014 + phase * 0.36 + 0.68).multiplyScalar(0.3);
+      }
     }
 
     const positions = this.particles.geometry.attributes.position.array as Float32Array;
+    const speed = (2 + energy.smoothed * 16 + events.drop * 22) * motion;
     for (let i = 0; i < positions.length; i += 3) {
-      positions[i + 2] += energy.smoothed * 20 * dt + motion.impact * 5;
-      if (positions[i + 2] > 0) {
-        positions[i + 2] = -100;
-      }
+      positions[i + 2] += speed * dt;
+      if (positions[i + 2] > 2) positions[i + 2] = -100;
     }
     this.particles.geometry.attributes.position.needsUpdate = true;
 
+    if (this.options.palette === 'rainbow') {
+      const phase = this.time * 0.014 + reactivity.high * 0.08;
+      setSpectralColor(this.tunnelMaterial.color, phase + 0.65).multiplyScalar(0.42);
+      setSpectralColor(this.tunnelMaterial.emissive, phase + 0.76).multiplyScalar(0.2 + events.drop * 0.12);
+      setSpectralColor(this.particleMaterial.color, phase + 0.92);
+    }
+    this.particleMaterial.opacity = 0.2 + reactivity.high * 0.34 + events.snare * 0.2;
     this.renderer.render(this.scene, this.camera);
+  }
+
+  dispose(): void {
+    disposeScene(this.scene);
+    this.renderer.dispose();
+    this.renderer.domElement.remove();
   }
 }

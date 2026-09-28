@@ -1,110 +1,115 @@
 import * as THREE from 'three';
-import type { ReactiveState } from '../types';
+import type { ReactiveState, VisualizerOptions } from '../types';
+import { DEFAULT_VISUALIZER_OPTIONS } from '../types';
+import { disposeScene, type VisualizerEnvironment } from './Environment';
+import { APV_MIDNIGHT, setSpectralColor } from './SpectralPalette';
 
-const clamp = (value: number, min = 0, max = 1) => Math.min(Math.max(value, min), max);
-
-export class LiquidEnvironment {
+export class LiquidEnvironment implements VisualizerEnvironment {
   private readonly scene = new THREE.Scene();
-  private readonly camera = new THREE.PerspectiveCamera(54, window.innerWidth / window.innerHeight, 0.1, 1000);
+  private readonly camera = new THREE.PerspectiveCamera(54, 1, 0.1, 1000);
   private readonly root = new THREE.Group();
+  private readonly surface: THREE.Mesh;
+  private readonly fluidPlane: THREE.Mesh;
+  private readonly ripples: THREE.Points;
+  private readonly surfaceMaterial: THREE.MeshStandardMaterial;
+  private readonly fluidMaterial: THREE.MeshStandardMaterial;
+  private readonly rippleMaterial: THREE.PointsMaterial;
+  private options: VisualizerOptions = { ...DEFAULT_VISUALIZER_OPTIONS };
+  private time = 0;
 
-  public readonly renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  readonly renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
 
-  private surface: THREE.Mesh;
-  private surfaceGeometry: THREE.IcosahedronGeometry;
-  private fluidPlane: THREE.Mesh;
-  private ripples: THREE.Points;
-
-  constructor() {
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.8));
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setClearColor(new THREE.Color('#0a1628'));
-
+  constructor(options: Partial<VisualizerOptions> = {}) {
+    this.setOptions(options);
+    this.renderer.setSize(1, 1, false);
+    this.renderer.setClearColor(APV_MIDNIGHT.background);
     this.scene.add(this.root);
-    this.camera.position.set(0, 3, 8);
+    this.camera.position.set(0, 2.6, 8);
 
-    const ambientLight = new THREE.AmbientLight('#7db4ff', 1.2);
-    const keyLight = new THREE.DirectionalLight('#a8d5ff', 1.8);
-    keyLight.position.set(5, 6, 4);
+    this.scene.add(new THREE.AmbientLight('#5f7dff', 1.1));
+    const key = new THREE.DirectionalLight('#d9fbff', 1.9);
+    key.position.set(5, 6, 4);
+    this.scene.add(key);
 
-    this.scene.add(ambientLight, keyLight);
-
-    this.surfaceGeometry = new THREE.IcosahedronGeometry(2.4, 3);
-    const surfaceMaterial = new THREE.MeshStandardMaterial({
-      color: '#4db8e8',
-      emissive: '#1a3a4d',
-      metalness: 0.4,
-      roughness: 0.24,
-      transparent: true,
-      opacity: 0.88,
+    this.surfaceMaterial = new THREE.MeshStandardMaterial({
+      color: '#4bd8ff', emissive: '#12205f', metalness: 0.48, roughness: 0.18,
+      transparent: true, opacity: 0.9,
     });
-
-    this.surface = new THREE.Mesh(this.surfaceGeometry, surfaceMaterial);
+    this.surface = new THREE.Mesh(new THREE.IcosahedronGeometry(2.4, 3), this.surfaceMaterial);
     this.root.add(this.surface);
 
-    const fluidGeometry = new THREE.PlaneGeometry(18, 18, 32, 32);
-    const fluidMaterial = new THREE.MeshStandardMaterial({
-      color: '#2ba8d8',
-      emissive: '#0d2a3d',
-      metalness: 0.35,
-      roughness: 0.3,
-      transparent: true,
-      opacity: 0.65,
+    this.fluidMaterial = new THREE.MeshStandardMaterial({
+      color: '#7b35ff', emissive: '#160d3d', metalness: 0.4, roughness: 0.26,
+      transparent: true, opacity: 0.58, side: THREE.DoubleSide,
     });
-
-    this.fluidPlane = new THREE.Mesh(fluidGeometry, fluidMaterial);
+    this.fluidPlane = new THREE.Mesh(new THREE.PlaneGeometry(18, 18, 32, 32), this.fluidMaterial);
     this.fluidPlane.rotation.x = -Math.PI / 2.2;
     this.fluidPlane.position.y = -1.2;
     this.root.add(this.fluidPlane);
 
-    const rippleGeometry = new THREE.BufferGeometry();
-    const rippleCount = 400;
-    const ripplePositions = new Float32Array(rippleCount * 3);
-    for (let i = 0; i < rippleCount; i += 1) {
-      ripplePositions[i * 3] = (Math.random() - 0.5) * 16;
-      ripplePositions[i * 3 + 1] = -1 + Math.random() * 0.2;
-      ripplePositions[i * 3 + 2] = (Math.random() - 0.5) * 16;
+    const geometry = new THREE.BufferGeometry();
+    const count = 500;
+    const positions = new Float32Array(count * 3);
+    for (let i = 0; i < count; i += 1) {
+      positions[i * 3] = (Math.random() - 0.5) * 16;
+      positions[i * 3 + 1] = -1 + Math.random() * 0.2;
+      positions[i * 3 + 2] = (Math.random() - 0.5) * 16;
     }
-    rippleGeometry.setAttribute('position', new THREE.BufferAttribute(ripplePositions, 3));
-    const rippleMaterial = new THREE.PointsMaterial({
-      color: '#b3e5fc',
-      size: 0.08,
-      transparent: true,
-      opacity: 0.7,
-    });
-    this.ripples = new THREE.Points(rippleGeometry, rippleMaterial);
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    this.rippleMaterial = new THREE.PointsMaterial({ color: '#ff63d8', size: 0.075, transparent: true, opacity: 0.66 });
+    this.ripples = new THREE.Points(geometry, this.rippleMaterial);
     this.root.add(this.ripples);
-
-    window.addEventListener('resize', () => this.handleResize());
   }
 
-  handleResize() {
-    this.camera.aspect = window.innerWidth / window.innerHeight;
+  setOptions(options: Partial<VisualizerOptions>): void {
+    this.options = { ...this.options, ...options };
+  }
+
+  resize(width: number, height: number, pixelRatio = window.devicePixelRatio): void {
+    const safeHeight = Math.max(1, height);
+    this.camera.aspect = Math.max(1, width) / safeHeight;
     this.camera.updateProjectionMatrix();
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.setPixelRatio(Math.min(pixelRatio, this.options.complexity > 1 ? 2 : 1.6));
+    this.renderer.setSize(Math.max(1, width), safeHeight, false);
   }
 
-  update(state: ReactiveState, dt: number) {
-    const { reactivity, energy, motion, events } = state;
+  update(state: ReactiveState, dt: number): void {
+    this.time += dt;
+    const baseMotion = this.options.reducedMotion ? this.options.motionIntensity * 0.28 : this.options.motionIntensity;
+    const { reactivity, energy, events } = state;
+    const motion = baseMotion * (1 - events.quiet * 0.72);
 
-    this.surface.rotation.x += dt * (0.2 + reactivity.mid * 0.8);
-    this.surface.rotation.y += dt * (0.4 + reactivity.bass * 1.2);
-    this.surface.scale.setScalar(1 + reactivity.bass * 0.8 + motion.pressure * 0.6);
-    this.surface.position.y = 0.2 + motion.impact * 1.4;
+    this.surface.rotation.x += dt * motion * (0.12 + reactivity.mid * 0.55);
+    this.surface.rotation.y += dt * motion * (0.2 + reactivity.bass * 0.8);
+    this.surface.scale.setScalar(1 + motion * (reactivity.bass * 0.42 + reactivity.sub * 0.26));
+    this.surface.position.y += ((0.2 + events.kick * 0.5 * motion) - this.surface.position.y) * 0.14;
 
-    this.fluidPlane.scale.setScalar(1 + reactivity.lowMid * 0.5 + motion.flow * 0.7);
-    this.fluidPlane.rotation.z += dt * (0.08 + reactivity.mid * 0.3);
-    this.fluidPlane.position.y = -1.2 + energy.smoothed * 0.6;
+    this.fluidPlane.scale.setScalar(1 + motion * (reactivity.lowMid * 0.22 + state.motion.flow * 0.28));
+    this.fluidPlane.rotation.z += dt * motion * (0.025 + reactivity.mid * 0.16);
+    this.fluidPlane.position.y = -1.2 + energy.smoothed * 0.28;
+    this.ripples.position.y = -1 + events.transient * 0.35 * motion;
+    this.ripples.rotation.y += dt * motion * (0.05 + reactivity.high * 0.24);
 
-    this.ripples.rotation.y += dt * (0.12 + motion.shimmer * 0.4);
-    this.ripples.position.y = -1 + events.transient * 0.8;
+    const cameraDist = 8 - events.drop * 0.75 * motion;
+    this.camera.position.z += (cameraDist - this.camera.position.z) * 0.07;
+    this.camera.position.x += (((state.motion.flow - 0.45) * 1.25 * motion) - this.camera.position.x) * 0.04;
+    this.camera.lookAt(0, 0.35, 0);
 
-    const cameraDist = 8 - motion.impact * 1.2;
-    this.camera.position.z += (cameraDist - this.camera.position.z) * 0.06;
-    this.camera.position.x = motion.flow * 2.4;
-    this.camera.position.y = 3 + motion.pressure * 0.8;
-    this.camera.lookAt(0, 0.5, 0);
+    if (this.options.palette === 'rainbow') {
+      const phase = this.time * 0.014 + reactivity.mid * 0.07;
+      setSpectralColor(this.surfaceMaterial.color, phase + 0.5);
+      setSpectralColor(this.surfaceMaterial.emissive, phase + 0.67).multiplyScalar(0.28 + events.drop * 0.16);
+      setSpectralColor(this.fluidMaterial.color, phase + 0.77);
+      setSpectralColor(this.rippleMaterial.color, phase + 0.92);
+    }
 
+    this.rippleMaterial.opacity = 0.24 + reactivity.high * 0.36 + events.snare * 0.22;
     this.renderer.render(this.scene, this.camera);
+  }
+
+  dispose(): void {
+    disposeScene(this.scene);
+    this.renderer.dispose();
+    this.renderer.domElement.remove();
   }
 }
