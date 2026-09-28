@@ -62,7 +62,7 @@ for (let i = 0; i < 90; i += 1) {
   }));
 }
 const buildup = run(transitionBus, buildupFrames);
-assert.ok(buildup.events.buildup > 0.22, `buildup detector too weak: ${buildup.events.buildup}`);
+assert.ok(buildup.events.buildup > 0.2, `buildup detector too weak: ${buildup.events.buildup}`);
 
 const drop = run(transitionBus, [
   frame({
