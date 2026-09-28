@@ -54,7 +54,6 @@ export class BeatDetector {
       buildup,
       kickEnergy: kick,
       snareEnergy: snare,
-      ...
     };
   }
 }

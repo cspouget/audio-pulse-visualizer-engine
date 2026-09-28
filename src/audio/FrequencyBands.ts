@@ -1,21 +1,3 @@
-import type { BandName, AudioAnalysis } from '../types';
-
-export const FREQUENCY_BANDS: Record<BandName, { min: number; max: number }> = {
-  sub: { min: 20, max: 60 },
-  bass: { min: 60, max: 180 },
-  lowMid: { min: 180, max: 500 },
-  mid: { min: 500, max: 2000 },
-  highMid: { min: 2000, max: 6000 },
-  high: { min: 6000, max: 20000 },
-};
-
-const clamp = (value: number, min = 0, max = 1) => Math.min(Math.max(value, min), max);
-
-export function getBinIndexForFrequency(frequency: number, sampleRate: number, fftSize: number) {
-  const nyquist = sampleRate / 2;
-  return Math.min(fftSize / 2 - 1, Math.max(0, (frequency / nyquist) * (fftSize / 2)));
-}
-
 export function computeBandValues(frequencyData: Uint8Array, sampleRate: number, fftSize: number): AudioAnalysis {
   const bandValues: Partial<Record<BandName, number>> = {};
 
@@ -52,6 +34,9 @@ export function computeBandValues(frequencyData: Uint8Array, sampleRate: number,
       overallRms * 0.18,
   );
 
+  const onsetStrength = clamp((peak + spectralEnergy * 0.62) / 1.8);
+  const transient = clamp((peak * 0.65 + onsetStrength * 0.7 + spectralEnergy * 0.55) / 1.9);
+
   const sub = bandValues.sub ?? 0;
   const bass = bandValues.bass ?? 0;
   const lowMid = bandValues.lowMid ?? 0;
@@ -69,9 +54,9 @@ export function computeBandValues(frequencyData: Uint8Array, sampleRate: number,
     overallRms,
     peak,
     spectralEnergy,
-    transient: 0,
-    kickLikelihood: (sub * 0.85 + bass * 0.65) * 1.2,
-    snareLikelihood: (lowMid * 0.55 + mid * 0.45 + highMid * 0.3) * 1.4,
-    onsetStrength: clamp((peak + spectralEnergy * 0.62) / 1.8),
+    transient,
+    kickLikelihood: clamp((sub * 0.85 + bass * 0.65) * 1.2),
+    snareLikelihood: clamp((lowMid * 0.55 + mid * 0.45 + highMid * 0.3) * 1.4),
+    onsetStrength,
   };
 }
