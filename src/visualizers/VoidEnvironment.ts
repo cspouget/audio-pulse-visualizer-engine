@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { ReactiveState, VisualizerOptions } from '../types';
 import { DEFAULT_VISUALIZER_OPTIONS } from '../types';
 import { disposeScene, type VisualizerEnvironment } from './Environment';
+import { APV_MIDNIGHT, setSpectralColor } from './SpectralPalette';
 
 export class VoidEnvironment implements VisualizerEnvironment {
   private readonly scene = new THREE.Scene();
@@ -21,7 +22,7 @@ export class VoidEnvironment implements VisualizerEnvironment {
   constructor(options: Partial<VisualizerOptions> = {}) {
     this.setOptions(options);
     this.renderer.setSize(1, 1, false);
-    this.renderer.setClearColor('#020207');
+    this.renderer.setClearColor(APV_MIDNIGHT.background);
     this.scene.add(this.root);
     this.camera.position.set(0, 0.5, 7);
 
@@ -72,8 +73,9 @@ export class VoidEnvironment implements VisualizerEnvironment {
 
   update(state: ReactiveState, dt: number): void {
     this.time += dt;
-    const motion = this.options.reducedMotion ? this.options.motionIntensity * 0.28 : this.options.motionIntensity;
+    const baseMotion = this.options.reducedMotion ? this.options.motionIntensity * 0.28 : this.options.motionIntensity;
     const { reactivity, energy, events } = state;
+    const motion = baseMotion * (1 - events.quiet * 0.72);
     this.shell.rotation.x += dt * motion * (0.22 + reactivity.mid * 1.4);
     this.shell.rotation.y += dt * motion * (0.42 + reactivity.highMid * 1.2);
     this.shell.scale.setScalar(1 + motion * (reactivity.bass * 0.68 + reactivity.sub * 0.42 + events.kick * 0.15));
@@ -90,11 +92,11 @@ export class VoidEnvironment implements VisualizerEnvironment {
     this.camera.lookAt(0, 0, 0);
 
     if (this.options.palette === 'rainbow') {
-      const hue = (this.time * 0.025 + reactivity.high * 0.12) % 1;
-      this.shellMaterial.color.setHSL((hue + 0.66) % 1, 0.82, 0.58);
-      this.shellMaterial.emissive.setHSL((hue + 0.78) % 1, 0.72, 0.14 + events.drop * 0.12);
-      this.haloMaterial.color.setHSL((hue + 0.48) % 1, 0.95, 0.62);
-      this.particleMaterial.color.setHSL((hue + 0.9) % 1, 0.88, 0.78);
+      const phase = this.time * 0.018 + reactivity.high * 0.08;
+      setSpectralColor(this.shellMaterial.color, phase + 0.72);
+      setSpectralColor(this.shellMaterial.emissive, phase + 0.84).multiplyScalar(0.3 + events.drop * 0.18);
+      setSpectralColor(this.haloMaterial.color, phase + 0.48);
+      setSpectralColor(this.particleMaterial.color, phase + 0.92);
     }
 
     this.haloMaterial.opacity = 0.16 + energy.smoothed * 0.2 + events.snare * 0.16;
