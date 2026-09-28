@@ -31,47 +31,63 @@ export class TransientDetector {
 }
 
 export class BeatDetector {
-  private previousEnergy = 0;
+  private previousRawEnergy = 0;
+  private previousRawSub = 0;
+  private previousRawBass = 0;
+  private slowRawEnergy = 0;
   private buildupMemory = 0;
 
   reset(): void {
-    this.previousEnergy = 0;
+    this.previousRawEnergy = 0;
+    this.previousRawSub = 0;
+    this.previousRawBass = 0;
+    this.slowRawEnergy = 0;
     this.buildupMemory = 0;
   }
 
-  detect(analysis: AudioAnalysis, transient: number, dt = 1 / 60): EventState {
-    const energy = clamp(analysis.overallRms * 0.58 + analysis.spectralEnergy * 0.42);
-    const delta = energy - this.previousEnergy;
-    this.previousEnergy = energy;
+  detect(analysis: AudioAnalysis, transient: number, dt = 1 / 60, rawAnalysis: AudioAnalysis = analysis): EventState {
+    const normalizedEnergy = clamp(analysis.overallRms * 0.58 + analysis.spectralEnergy * 0.42);
+    const rawEnergy = clamp(rawAnalysis.overallRms * 0.62 + rawAnalysis.spectralEnergy * 0.38);
+    const rawDelta = rawEnergy - this.previousRawEnergy;
+    const subJump = Math.max(0, rawAnalysis.sub - this.previousRawSub);
+    const bassJump = Math.max(0, rawAnalysis.bass - this.previousRawBass);
+
+    const slowAlpha = 1 - Math.exp(-dt * 0.9);
+    this.slowRawEnergy += (rawEnergy - this.slowRawEnergy) * slowAlpha;
+    const trendAboveBaseline = Math.max(0, rawEnergy - this.slowRawEnergy);
 
     const kick = clamp(analysis.kickLikelihood * 0.72 + analysis.sub * 0.35 + transient * 0.22);
     const snare = clamp(analysis.snareLikelihood * 0.74 + analysis.highMid * 0.22 + transient * 0.3);
-    const quiet = clamp((0.2 - energy) * 5);
-    const highEnergy = clamp((energy - 0.48) * 1.9 + analysis.bass * 0.25);
-    const energyIncrease = clamp(Math.max(0, delta) * 7 + transient * 0.24);
-    const energyDecrease = clamp(Math.max(0, -delta) * 7 + quiet * 0.2);
+    const quiet = clamp((0.2 - normalizedEnergy) * 5);
+    const highEnergy = clamp((normalizedEnergy - 0.48) * 1.9 + analysis.bass * 0.25);
+    const energyIncrease = clamp(Math.max(0, rawDelta) * 8 + transient * 0.18 + trendAboveBaseline * 1.8);
+    const energyDecrease = clamp(Math.max(0, -rawDelta) * 8 + quiet * 0.2);
 
     const buildInput = clamp(
-      Math.max(0, delta) * 5 +
-      analysis.highMid * 0.34 +
-      analysis.high * 0.26 +
-      transient * 0.2 -
-      analysis.sub * 0.18 -
-      quiet * 0.35,
+      trendAboveBaseline * 2.9 +
+      Math.max(0, rawDelta) * 4.2 +
+      analysis.highMid * 0.18 +
+      analysis.high * 0.15 +
+      analysis.mid * 0.1 -
+      quiet * 0.42,
     );
-    const buildupAlpha = 1 - Math.exp(-dt * (buildInput > this.buildupMemory ? 4.2 : 1.25));
+    const buildupAlpha = 1 - Math.exp(-dt * (buildInput > this.buildupMemory ? 2.8 : 0.7));
     this.buildupMemory += (buildInput - this.buildupMemory) * buildupAlpha;
 
-    const drop = clamp(
-      this.buildupMemory * 0.55 +
-      Math.max(0, delta) * 5.5 +
-      analysis.sub * 0.5 +
-      kick * 0.38 -
-      quiet * 0.8,
+    const transition = clamp(
+      Math.max(0, rawDelta) * 8.5 +
+      (subJump + bassJump) * 1.65 +
+      rawAnalysis.transient * 0.18 +
+      kick * 0.12,
     );
+    const drop = clamp(transition * (0.18 + this.buildupMemory * 1.25));
 
-    if (drop > 0.72) {
-      this.buildupMemory *= 0.35;
+    this.previousRawEnergy = rawEnergy;
+    this.previousRawSub = rawAnalysis.sub;
+    this.previousRawBass = rawAnalysis.bass;
+
+    if (drop > 0.68) {
+      this.buildupMemory *= 0.22;
     }
 
     return {
