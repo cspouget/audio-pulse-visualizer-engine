@@ -82,9 +82,13 @@ export class AudioAnalyzer {
 
   private disconnectSource(): void {
     try {
-      this.mediaSource?.disconnect();
+      if (this.mediaSource && this.analyser) {
+        // Remove only the engine's analyser edge. A host-owned AudioNode may
+        // have other destinations that must remain intact.
+        this.mediaSource.disconnect(this.analyser);
+      }
     } catch {
-      // Already disconnected.
+      // Already disconnected or the edge was never present.
     }
     try {
       this.analyser?.disconnect();
