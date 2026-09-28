@@ -33,7 +33,7 @@ export class ReactiveBus {
     const reactiveBands = buildReactiveBands(normalized);
     const energy = this.energyTracker.update(normalized.overallRms, dt);
     const transient = this.transientDetector.detect(normalized);
-    const events = this.beatDetector.detect(normalized, transient, dt);
+    const events = this.beatDetector.detect(normalized, transient, dt, analysis);
     const overall = clamp(
       normalized.sub * 0.18 + normalized.bass * 0.2 + normalized.lowMid * 0.14 +
       normalized.mid * 0.18 + normalized.highMid * 0.16 + normalized.high * 0.14,
