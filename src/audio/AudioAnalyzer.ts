@@ -11,7 +11,7 @@ export class AudioAnalyzer {
   private audioContext: AudioContext | null = null;
   private analyser: AnalyserNode | null = null;
   private mediaSource: AudioNode | null = null;
-  private frequencyData: Uint8Array | null = null;
+  private frequencyData: Uint8Array<ArrayBuffer> | null = null;
   private mediaStream: MediaStream | null = null;
   private ownsContext = false;
   private connectedElement: HTMLMediaElement | null = null;
