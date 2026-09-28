@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { ReactiveState, VisualizerOptions } from '../types';
 import { DEFAULT_VISUALIZER_OPTIONS } from '../types';
 import { disposeScene, type VisualizerEnvironment } from './Environment';
+import { APV_MIDNIGHT, setSpectralColor } from './SpectralPalette';
 
 export class LiquidEnvironment implements VisualizerEnvironment {
   private readonly scene = new THREE.Scene();
@@ -21,7 +22,7 @@ export class LiquidEnvironment implements VisualizerEnvironment {
   constructor(options: Partial<VisualizerOptions> = {}) {
     this.setOptions(options);
     this.renderer.setSize(1, 1, false);
-    this.renderer.setClearColor('#03050b');
+    this.renderer.setClearColor(APV_MIDNIGHT.background);
     this.scene.add(this.root);
     this.camera.position.set(0, 2.6, 8);
 
@@ -74,8 +75,9 @@ export class LiquidEnvironment implements VisualizerEnvironment {
 
   update(state: ReactiveState, dt: number): void {
     this.time += dt;
-    const motion = this.options.reducedMotion ? this.options.motionIntensity * 0.3 : this.options.motionIntensity;
+    const baseMotion = this.options.reducedMotion ? this.options.motionIntensity * 0.28 : this.options.motionIntensity;
     const { reactivity, energy, events } = state;
+    const motion = baseMotion * (1 - events.quiet * 0.72);
 
     this.surface.rotation.x += dt * motion * (0.12 + reactivity.mid * 0.55);
     this.surface.rotation.y += dt * motion * (0.2 + reactivity.bass * 0.8);
@@ -94,11 +96,11 @@ export class LiquidEnvironment implements VisualizerEnvironment {
     this.camera.lookAt(0, 0.35, 0);
 
     if (this.options.palette === 'rainbow') {
-      const hue = (this.time * 0.018 + reactivity.mid * 0.08) % 1;
-      this.surfaceMaterial.color.setHSL((hue + 0.52) % 1, 0.9, 0.56);
-      this.surfaceMaterial.emissive.setHSL((hue + 0.68) % 1, 0.7, 0.13 + events.drop * 0.1);
-      this.fluidMaterial.color.setHSL((hue + 0.76) % 1, 0.84, 0.5);
-      this.rippleMaterial.color.setHSL((hue + 0.91) % 1, 0.96, 0.68);
+      const phase = this.time * 0.014 + reactivity.mid * 0.07;
+      setSpectralColor(this.surfaceMaterial.color, phase + 0.5);
+      setSpectralColor(this.surfaceMaterial.emissive, phase + 0.67).multiplyScalar(0.28 + events.drop * 0.16);
+      setSpectralColor(this.fluidMaterial.color, phase + 0.77);
+      setSpectralColor(this.rippleMaterial.color, phase + 0.92);
     }
 
     this.rippleMaterial.opacity = 0.24 + reactivity.high * 0.36 + events.snare * 0.22;
