@@ -9,13 +9,16 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc --noEmit && vite build && npm run build:lib",
     "build:lib": "vite build --config vite.lib.config.ts && tsc -p tsconfig.lib.json",
     "preview": "vite preview --host 0.0.0.0",
-    "prepare": "npm run build:lib"
+    "prepare": "npm run build:lib",
+    "test:reactivity": "node scripts/reactivity-smoke.mjs"
   },
   "dependencies": {
     "three": "^0.169.0"
