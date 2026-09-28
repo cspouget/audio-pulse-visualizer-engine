@@ -1,33 +1,54 @@
-import type { BandName, AudioAnalysis } from '../types';
+import { BAND_NAMES, type AudioAnalysis, type BandName } from '../types';
 
 const clamp = (value: number, min = 0, max = 1) => Math.min(Math.max(value, min), max);
 
 export class AdaptiveNormalizer {
-  private baseline = new Map<BandName, number>();
+  private peaks = new Map<BandName, number>();
+  private floors = new Map<BandName, number>();
+  private overallPeak = 0.12;
+
+  reset(): void {
+    this.peaks.clear();
+    this.floors.clear();
+    this.overallPeak = 0.12;
+  }
 
   normalize(analysis: AudioAnalysis): AudioAnalysis {
     const next = { ...analysis };
 
-    const bandNames: BandName[] = ['sub', 'bass', 'lowMid', 'mid', 'highMid', 'high'];
-
-    for (const band of bandNames) {
-      const previous = this.baseline.get(band) ?? 0.14;
+    for (const band of BAND_NAMES) {
       const current = analysis[band];
-      const smoothed = previous * 0.96 + current * 0.04;
-      this.baseline.set(band, smoothed);
+      const previousPeak = this.peaks.get(band) ?? 0.18;
+      const previousFloor = this.floors.get(band) ?? 0.01;
 
-      const adaptiveGain = 1 + Math.max(0, analysis.overallRms - 0.14) * 2.4;
-      const centered = (current - smoothed * 0.72) * adaptiveGain;
-      next[band] = clamp(centered * 1.4 + current * 0.25);
+      const peak = Math.max(current, previousPeak * 0.9975);
+      const floorTarget = Math.min(current, previousFloor + 0.002);
+      const floor = previousFloor * 0.995 + floorTarget * 0.005;
+
+      this.peaks.set(band, peak);
+      this.floors.set(band, floor);
+
+      if (current < 0.004) {
+        next[band] = 0;
+        continue;
+      }
+
+      const usableRange = Math.max(0.045, peak - floor);
+      const normalized = clamp((current - floor) / usableRange);
+      next[band] = clamp(normalized * 0.82 + current * 0.18);
     }
 
-    const energyBoost = 1 + Math.max(0, analysis.overallRms - 0.12) * 2.4;
-    next.overallRms = clamp(analysis.overallRms * energyBoost);
-    next.peak = clamp(analysis.peak * 1.2);
-    next.spectralEnergy = clamp(analysis.spectralEnergy * 1.18);
-    next.kickLikelihood = clamp((analysis.kickLikelihood + next.sub * 0.6) * 0.9);
-    next.snareLikelihood = clamp((analysis.snareLikelihood + next.mid * 0.45) * 0.9);
-    next.onsetStrength = clamp((analysis.onsetStrength + next.highMid * 0.35) * 0.9);
+    this.overallPeak = Math.max(analysis.overallRms, this.overallPeak * 0.998);
+    const loudnessScale = Math.max(0.06, this.overallPeak);
+    next.overallRms = clamp(analysis.overallRms / loudnessScale);
+    next.peak = clamp(analysis.peak / Math.max(0.1, this.overallPeak * 1.15));
+    next.spectralEnergy = clamp(
+      next.lowMid * 0.18 + next.mid * 0.24 + next.highMid * 0.22 + next.high * 0.14 + next.overallRms * 0.22,
+    );
+    next.kickLikelihood = clamp(next.sub * 0.72 + next.bass * 0.58 + next.peak * 0.12);
+    next.snareLikelihood = clamp(next.lowMid * 0.3 + next.mid * 0.35 + next.highMid * 0.45 + next.transient * 0.15);
+    next.onsetStrength = clamp(next.peak * 0.45 + next.spectralEnergy * 0.55);
+    next.transient = clamp(next.peak * 0.5 + next.onsetStrength * 0.35 + next.highMid * 0.15);
 
     return next;
   }
