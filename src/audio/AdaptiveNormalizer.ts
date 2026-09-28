@@ -40,7 +40,11 @@ export class AdaptiveNormalizer {
 
     this.overallPeak = Math.max(analysis.overallRms, this.overallPeak * 0.998);
     const loudnessScale = Math.max(0.06, this.overallPeak);
-    next.overallRms = clamp(analysis.overallRms / loudnessScale);
+    // Preserve a true silence floor. Adaptive gain should rescue quiet masters,
+    // but it must not turn near-silence into sustained medium energy.
+    next.overallRms = analysis.overallRms < 0.045
+      ? clamp(analysis.overallRms * 2)
+      : clamp(analysis.overallRms / loudnessScale);
     next.peak = clamp(analysis.peak / Math.max(0.1, this.overallPeak * 1.15));
     next.spectralEnergy = clamp(
       next.lowMid * 0.18 + next.mid * 0.24 + next.highMid * 0.22 + next.high * 0.14 + next.overallRms * 0.22,
